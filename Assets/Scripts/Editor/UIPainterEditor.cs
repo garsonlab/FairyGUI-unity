@@ -7,93 +7,90 @@ using FairyGUI;
 
 namespace FairyGUIEditor
 {
-	/// <summary>
-	/// 
-	/// </summary>
-	[CustomEditor(typeof(UIPainter))]
-	public class UIPainterEditor : Editor
-	{
-		SerializedProperty packageName;
-		SerializedProperty componentName;
-		SerializedProperty renderCamera;
-		SerializedProperty fairyBatching;
-		SerializedProperty touchDisabled;
-		SerializedProperty sortingOrder;
+    /// <summary>
+    /// 
+    /// </summary>
+    [CustomEditor(typeof(UIPainter))]
+    public class UIPainterEditor : Editor
+    {
+        SerializedProperty packageName;
+        SerializedProperty componentName;
+        SerializedProperty renderCamera;
+        SerializedProperty fairyBatching;
+        SerializedProperty touchDisabled;
+        SerializedProperty sortingOrder;
 
-#if (UNITY_5 || UNITY_5_3_OR_NEWER)
-		string[] propertyToExclude;
-#endif
-		void OnEnable()
-		{
-			packageName = serializedObject.FindProperty("packageName");
-			componentName = serializedObject.FindProperty("componentName");
-			renderCamera = serializedObject.FindProperty("renderCamera");
-			fairyBatching = serializedObject.FindProperty("fairyBatching");
-			touchDisabled = serializedObject.FindProperty("touchDisabled");
-			sortingOrder = serializedObject.FindProperty("sortingOrder");
+        string[] propertyToExclude;
 
-#if (UNITY_5 || UNITY_5_3_OR_NEWER)
-			propertyToExclude = new string[] { "m_Script", "packageName", "componentName", "packagePath",
-				"renderCamera", "fairyBatching", "touchDisabled","sortingOrder"
-			};
-#endif
-		}
+        void OnEnable()
+        {
+            packageName = serializedObject.FindProperty("packageName");
+            componentName = serializedObject.FindProperty("componentName");
+            renderCamera = serializedObject.FindProperty("renderCamera");
+            fairyBatching = serializedObject.FindProperty("fairyBatching");
+            touchDisabled = serializedObject.FindProperty("touchDisabled");
+            sortingOrder = serializedObject.FindProperty("sortingOrder");
 
-		public override void OnInspectorGUI()
-		{
-			serializedObject.Update();
+            propertyToExclude = new string[] { "m_Script", "packageName", "componentName", "packagePath",
+                "renderCamera", "fairyBatching", "touchDisabled","sortingOrder"
+            };
+        }
 
-			UIPainter panel = target as UIPainter;
-#if (UNITY_5 || UNITY_5_3_OR_NEWER)
-			DrawPropertiesExcluding(serializedObject, propertyToExclude);
-#endif
-			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.PrefixLabel("Package Name");
-			if (GUILayout.Button(packageName.stringValue, "ObjectField"))
-				EditorWindow.GetWindow<PackagesWindow>(true, "Select a UI Component").SetSelection(packageName.stringValue, componentName.stringValue);
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
 
-			if (GUILayout.Button("Clear", GUILayout.Width(50)))
-			{
+            UIPainter panel = target as UIPainter;
+
+            DrawPropertiesExcluding(serializedObject, propertyToExclude);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel("Package Name");
+            if (GUILayout.Button(packageName.stringValue, "ObjectField"))
+                EditorWindow.GetWindow<PackagesWindow>(true, "Select a UI Component").SetSelection(packageName.stringValue, componentName.stringValue);
+
+            if (GUILayout.Button("Clear", GUILayout.Width(50)))
+            {
 #if UNITY_2018_3_OR_NEWER
-				bool isPrefab = PrefabUtility.GetPrefabAssetType(panel) != PrefabAssetType.NotAPrefab;
+                bool isPrefab = PrefabUtility.GetPrefabAssetType(panel) != PrefabAssetType.NotAPrefab;
 #else
-				bool isPrefab = PrefabUtility.GetPrefabType(panel) == PrefabType.Prefab;
+                bool isPrefab = PrefabUtility.GetPrefabType(panel) == PrefabType.Prefab;
 #endif
-				panel.SendMessage("OnUpdateSource", new object[] { null, null, null, !isPrefab });
+                panel.SendMessage("OnUpdateSource", new object[] { null, null, null, !isPrefab });
 
 #if UNITY_5_3_OR_NEWER
-				EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+                EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
 #elif UNITY_5
-				EditorApplication.MarkSceneDirty();
+                EditorApplication.MarkSceneDirty();
 #else
-				EditorUtility.SetDirty(panel);
+                EditorUtility.SetDirty(panel);
 #endif
-			}
-			EditorGUILayout.EndHorizontal();
+            }
+            EditorGUILayout.EndHorizontal();
 
-			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.PrefixLabel("Component Name");
-			if (GUILayout.Button(componentName.stringValue, "ObjectField"))
-				EditorWindow.GetWindow<PackagesWindow>(true, "Select a UI Component").SetSelection(packageName.stringValue, componentName.stringValue);
-			EditorGUILayout.EndHorizontal();
-			int oldSortingOrder = panel.sortingOrder;
-			EditorGUILayout.PropertyField(sortingOrder);
-			EditorGUILayout.PropertyField(renderCamera);
-			EditorGUILayout.PropertyField(fairyBatching);
-			EditorGUILayout.PropertyField(touchDisabled);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel("Component Name");
+            if (GUILayout.Button(componentName.stringValue, "ObjectField"))
+                EditorWindow.GetWindow<PackagesWindow>(true, "Select a UI Component").SetSelection(packageName.stringValue, componentName.stringValue);
+            EditorGUILayout.EndHorizontal();
+            int oldSortingOrder = panel.sortingOrder;
+            EditorGUILayout.PropertyField(sortingOrder);
+            EditorGUILayout.PropertyField(renderCamera);
+            EditorGUILayout.PropertyField(fairyBatching);
+            EditorGUILayout.PropertyField(touchDisabled);
 
-			if (serializedObject.ApplyModifiedProperties())
-			{
+            if (serializedObject.ApplyModifiedProperties())
+            {
 #if UNITY_2018_3_OR_NEWER
-				bool isPrefab = PrefabUtility.GetPrefabAssetType(panel) != PrefabAssetType.NotAPrefab;
+                bool isPrefab = PrefabUtility.GetPrefabAssetType(panel) != PrefabAssetType.NotAPrefab;
 #else
-				bool isPrefab = PrefabUtility.GetPrefabType(panel) == PrefabType.Prefab;
+                bool isPrefab = PrefabUtility.GetPrefabType(panel) == PrefabType.Prefab;
 #endif
-				if (!isPrefab)
-				{
-					panel.ApplyModifiedProperties(sortingOrder.intValue != oldSortingOrder);
-				}
-			}
-		}
-	}
+                if (!isPrefab)
+                {
+                    panel.ApplyModifiedProperties(sortingOrder.intValue != oldSortingOrder);
+                }
+            }
+        }
+    }
 }

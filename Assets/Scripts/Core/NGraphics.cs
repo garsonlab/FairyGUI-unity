@@ -2,833 +2,831 @@
 using System.Collections.Generic;
 using UnityEngine;
 using FairyGUI.Utils;
+using Object = UnityEngine.Object;
 
 namespace FairyGUI
 {
-	/// <summary>
-	/// 
-	/// </summary>
-	public class NGraphics : IMeshFactory
-	{
-		/// <summary>
-		/// 
-		/// </summary>
-		public GameObject gameObject { get; private set; }
+    /// <summary>
+    /// 
+    /// </summary>
+    public class NGraphics : IMeshFactory
+    {
+        /// <summary>
+        /// 
+        /// </summary>
+        public GameObject gameObject { get; private set; }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public MeshFilter meshFilter { get; private set; }
+        /// <summary>
+        /// 
+        /// </summary>
+        public MeshFilter meshFilter { get; private set; }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public MeshRenderer meshRenderer { get; private set; }
+        /// <summary>
+        /// 
+        /// </summary>
+        public MeshRenderer meshRenderer { get; private set; }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public Mesh mesh { get; private set; }
+        /// <summary>
+        /// 
+        /// </summary>
+        public Mesh mesh { get; private set; }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public BlendMode blendMode;
+        /// <summary>
+        /// 
+        /// </summary>
+        public BlendMode blendMode;
 
-		/// <summary>
-		/// 不参与剪裁
-		/// </summary>
-		public bool dontClip;
+        /// <summary>
+        /// 不参与剪裁
+        /// </summary>
+        public bool dontClip;
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public delegate void MeshModifier();
+        /// <summary>
+        /// 当Mesh更新时触发
+        /// </summary>
+        public event Action meshModifier;
 
-		/// <summary>
-		/// 当Mesh更新时被调用
-		/// </summary>
-		public MeshModifier meshModifier;
+        NTexture _texture;
+        string _shader;
+        Material _material;
+        int _customMatarial; //0-none, 1-common, 2-support internal mask, 128-owns material
+        MaterialManager _manager;
+        string[] _shaderKeywords;
+        int _materialFlags;
+        IMeshFactory _meshFactory;
 
-		NTexture _texture;
-		string _shader;
-		Material _material;
-		bool _customMatarial;
-		MaterialManager _manager;
-		string[] _materialKeywords;
-		IMeshFactory _meshFactory;
+        float _alpha;
+        Color _color;
+        bool _meshDirty;
+        Rect _contentRect;
+        FlipType _flip;
 
-		float _alpha;
-		Color _color;
-		bool _meshDirty;
-		Rect _contentRect;
-		FlipType _flip;
-		Matrix4x4? _vertexMatrix;
-		Vector3? _cameraPosition;
+        public class VertexMatrix
+        {
+            public Vector3 cameraPos;
+            public Matrix4x4 matrix;
+        }
+        VertexMatrix _vertexMatrix;
 
-		bool hasAlphaBackup;
-		List<byte> _alphaBackup; //透明度改变需要通过修改顶点颜色实现，但顶点颜色本身可能就带有透明度，所以这里要有一个备份
+        bool hasAlphaBackup;
+        List<byte> _alphaBackup; //透明度改变需要通过修改顶点颜色实现，但顶点颜色本身可能就带有透明度，所以这里要有一个备份
 
-		int _maskFlag;
-		StencilEraser _stencilEraser;
-
-#if !(UNITY_5_2 || UNITY_5_3_OR_NEWER)
-		Vector3[] _vertices;
-		Vector2[] _uv;
-		int[] _triangles;
-#endif
+        internal int _maskFlag;
+        StencilEraser _stencilEraser;
 
 #if !UNITY_5_6_OR_NEWER
-		Color32[] _colors;
+        Color32[] _colors;
 #endif
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <param name="gameObject"></param>
-		public NGraphics(GameObject gameObject)
-		{
-			this.gameObject = gameObject;
+        MaterialPropertyBlock _propertyBlock;
+        bool _blockUpdated;
 
-			_alpha = 1f;
-			_shader = ShaderConfig.imageShader;
-			_color = Color.white;
-			_meshFactory = this;
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="gameObject"></param>
+        public NGraphics(GameObject gameObject)
+        {
+            this.gameObject = gameObject;
 
-			meshFilter = gameObject.AddComponent<MeshFilter>();
-			meshRenderer = gameObject.AddComponent<MeshRenderer>();
-#if (UNITY_5 || UNITY_5_3_OR_NEWER)
-			meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-			meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
-#else
-			meshRenderer.castShadows = false;
-#endif
-			meshRenderer.receiveShadows = false;
+            _alpha = 1f;
+            _shader = ShaderConfig.imageShader;
+            _color = Color.white;
+            _meshFactory = this;
 
-			mesh = new Mesh();
-			mesh.name = gameObject.name;
-			mesh.MarkDynamic();
+            meshFilter = gameObject.AddComponent<MeshFilter>();
+            meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            meshRenderer.receiveShadows = false;
 
-			meshFilter.mesh = mesh;
+            mesh = new Mesh();
+            mesh.name = gameObject.name;
+            mesh.MarkDynamic();
 
-			meshFilter.hideFlags = DisplayOptions.hideFlags;
-			meshRenderer.hideFlags = DisplayOptions.hideFlags;
-			mesh.hideFlags = DisplayOptions.hideFlags;
+            meshFilter.mesh = mesh;
 
-			Stats.LatestGraphicsCreation++;
-		}
+            meshFilter.hideFlags = DisplayObject.hideFlags;
+            meshRenderer.hideFlags = DisplayObject.hideFlags;
+            mesh.hideFlags = DisplayObject.hideFlags;
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public IMeshFactory meshFactory
-		{
-			get { return _meshFactory; }
-			set
-			{
-				if (_meshFactory != value)
-				{
-					_meshFactory = value;
-					_meshDirty = true;
-				}
-			}
-		}
+            Stats.LatestGraphicsCreation++;
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <typeparam name="T"></typeparam>
-		/// <returns></returns>
-		public T GetMeshFactory<T>() where T : IMeshFactory, new()
-		{
-			if (!(_meshFactory is T))
-			{
-				_meshFactory = new T();
-				_meshDirty = true;
-			}
-			return (T)_meshFactory;
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public IMeshFactory meshFactory
+        {
+            get { return _meshFactory; }
+            set
+            {
+                if (_meshFactory != value)
+                {
+                    _meshFactory = value;
+                    _meshDirty = true;
+                }
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public Rect contentRect
-		{
-			get { return _contentRect; }
-			set
-			{
-				_contentRect = value;
-				_meshDirty = true;
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
+        public T GetMeshFactory<T>() where T : IMeshFactory, new()
+        {
+            if (!(_meshFactory is T))
+            {
+                _meshFactory = new T();
+                _meshDirty = true;
+            }
+            return (T)_meshFactory;
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public FlipType flip
-		{
-			get { return _flip; }
-			set
-			{
-				if (_flip != value)
-				{
-					_flip = value;
-					_meshDirty = true;
-				}
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public Rect contentRect
+        {
+            get { return _contentRect; }
+            set
+            {
+                _contentRect = value;
+                _meshDirty = true;
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public NTexture texture
-		{
-			get { return _texture; }
-			set
-			{
-				if (_texture != value)
-				{
-					_texture = value;
-					if (_customMatarial && _material != null)
-						_material.mainTexture = _texture != null ? _texture.nativeTexture : null;
-					_meshDirty = true;
-					UpdateManager();
-				}
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public FlipType flip
+        {
+            get { return _flip; }
+            set
+            {
+                if (_flip != value)
+                {
+                    _flip = value;
+                    _meshDirty = true;
+                }
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public string shader
-		{
-			get { return _shader; }
-			set
-			{
-				_shader = value;
-				UpdateManager();
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public NTexture texture
+        {
+            get { return _texture; }
+            set
+            {
+                if (_texture != value)
+                {
+                    _texture = value;
+                    if (_customMatarial != 0 && _material != null)
+                        _material.mainTexture = _texture != null ? _texture.nativeTexture : null;
+                    _meshDirty = true;
+                    UpdateManager();
+                }
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <param name="shader"></param>
-		/// <param name="texture"></param>
-		public void SetShaderAndTexture(string shader, NTexture texture)
-		{
-			_shader = shader;
-			_texture = texture;
-			if (_customMatarial && _material != null)
-				_material.mainTexture = _texture != null ? _texture.nativeTexture : null;
-			_meshDirty = true;
-			UpdateManager();
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public string shader
+        {
+            get { return _shader; }
+            set
+            {
+                _shader = value;
+                UpdateManager();
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public Material material
-		{
-			get { return _material; }
-			set
-			{
-				_material = value;
-				if (_material != null)
-				{
-					_customMatarial = true;
-					meshRenderer.sharedMaterial = _material;
-					if (_texture != null)
-						_material.mainTexture = _texture.nativeTexture;
-				}
-				else
-				{
-					_customMatarial = false;
-					meshRenderer.sharedMaterial = null;
-				}
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="shader"></param>
+        /// <param name="texture"></param>
+        public void SetShaderAndTexture(string shader, NTexture texture)
+        {
+            _shader = shader;
+            _texture = texture;
+            if (_customMatarial != 0 && _material != null)
+                _material.mainTexture = _texture != null ? _texture.nativeTexture : null;
+            _meshDirty = true;
+            UpdateManager();
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public string[] materialKeywords
-		{
-			get { return _materialKeywords; }
-			set
-			{
-				_materialKeywords = value;
-				UpdateManager();
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public Material material
+        {
+            get
+            {
+                if (_customMatarial == 0 && _material == null && _manager != null)
+                    _material = _manager.GetMaterial(_materialFlags, blendMode, 0);
+                return _material;
+            }
+            set
+            {
+                if ((_customMatarial & 128) != 0 && _material != null)
+                    Object.DestroyImmediate(_material);
 
-		void UpdateManager()
-		{
-			MaterialManager mm;
-			if (_texture != null)
-				mm = _texture.GetMaterialManager(_shader, _materialKeywords);
-			else
-				mm = null;
-			if (_manager != null && _manager != mm)
-				_manager.Release();
-			_manager = mm;
-		}
+                _material = value;
+                if (_material != null)
+                {
+                    _customMatarial = 1;
+                    if (_material.HasProperty(ShaderConfig.ID_Stencil) || _material.HasProperty(ShaderConfig.ID_ClipBox))
+                        _customMatarial |= 2;
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public bool enabled
-		{
-			get { return meshRenderer.enabled; }
-			set { meshRenderer.enabled = value; }
-		}
+                    meshRenderer.sharedMaterial = _material;
+                    if (_texture != null)
+                        _material.mainTexture = _texture.nativeTexture;
+                }
+                else
+                {
+                    _customMatarial = 0;
+                    meshRenderer.sharedMaterial = null;
+                }
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public int sortingOrder
-		{
-			get { return meshRenderer.sortingOrder; }
-			set { meshRenderer.sortingOrder = value; }
-		}
+        /// <summary>
+        /// Same as material property except that ownership is transferred to this object.
+        /// </summary>
+        /// <param name="material"></param>
+        public void SetMaterial(Material material)
+        {
+            this.material = material;
+            _customMatarial |= 128;
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <param name="value"></param>
-		internal void _SetStencilEraserOrder(int value)
-		{
-			_stencilEraser.meshRenderer.sortingOrder = value;
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public string[] materialKeywords
+        {
+            get { return _shaderKeywords; }
+            set
+            {
+                _shaderKeywords = value;
+                UpdateMaterialFlags();
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <param name="value"></param>
-		public Color color
-		{
-			get { return _color; }
-			set { _color = value; }
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="keyword"></param>
+        /// <param name="enabled"></param>
+        public void ToggleKeyword(string keyword, bool enabled)
+        {
+            if (enabled)
+            {
+                if (_shaderKeywords == null)
+                {
+                    _shaderKeywords = new string[] { keyword };
+                    UpdateMaterialFlags();
+                }
+                else if (Array.IndexOf(_shaderKeywords, keyword) == -1)
+                {
+                    Array.Resize(ref _shaderKeywords, _shaderKeywords.Length + 1);
+                    _shaderKeywords[_shaderKeywords.Length - 1] = keyword;
+                    UpdateMaterialFlags();
+                }
+            }
+            else
+            {
+                if (_shaderKeywords != null)
+                {
+                    int i = Array.IndexOf(_shaderKeywords, keyword);
+                    if (i != -1)
+                    {
+                        _shaderKeywords[i] = null;
+                        UpdateMaterialFlags();
+                    }
+                }
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public void Tint()
-		{
-			if (_meshDirty)
-				return;
+        void UpdateManager()
+        {
+            if (_texture != null)
+                _manager = _texture.GetMaterialManager(_shader);
+            else
+                _manager = null;
+            UpdateMaterialFlags();
+        }
 
-			int vertCount = mesh.vertexCount;
-			if (vertCount == 0)
-				return;
+        void UpdateMaterialFlags()
+        {
+            if (_customMatarial != 0)
+            {
+                if (material != null)
+                    material.shaderKeywords = _shaderKeywords;
+            }
+            else if (_shaderKeywords != null && _manager != null)
+                _materialFlags = _manager.GetFlagsByKeywords(_shaderKeywords);
+            else
+                _materialFlags = 0;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public bool enabled
+        {
+            get { return meshRenderer.enabled; }
+            set { meshRenderer.enabled = value; }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public int sortingOrder
+        {
+            get { return meshRenderer.sortingOrder; }
+            set { meshRenderer.sortingOrder = value; }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="value"></param>
+        internal void _SetStencilEraserOrder(int value)
+        {
+            _stencilEraser.meshRenderer.sortingOrder = value;
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="value"></param>
+        public Color color
+        {
+            get { return _color; }
+            set { _color = value; }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public void Tint()
+        {
+            if (_meshDirty)
+                return;
+
+            int vertCount = mesh.vertexCount;
+            if (vertCount == 0)
+                return;
 
 #if !UNITY_5_6_OR_NEWER
-			Color32[] colors = _colors;
-			if (colors == null)
-				colors = mesh.colors32;
+            Color32[] colors = _colors;
+            if (colors == null)
+                colors = mesh.colors32;
 #else
-			VertexBuffer vb = VertexBuffer.Begin();
-			mesh.GetColors(vb.colors);
-			List<Color32> colors = vb.colors;
+            VertexBuffer vb = VertexBuffer.Begin();
+            mesh.GetColors(vb.colors);
+            List<Color32> colors = vb.colors;
 #endif
-			for (int i = 0; i < vertCount; i++)
-			{
-				Color32 col = _color;
-				col.a = (byte)(_alpha * (hasAlphaBackup ? _alphaBackup[i] : (byte)255));
-				colors[i] = col;
-			}
+            for (int i = 0; i < vertCount; i++)
+            {
+                Color32 col = _color;
+                col.a = (byte)(_alpha * (hasAlphaBackup ? _alphaBackup[i] : (byte)255));
+                colors[i] = col;
+            }
 
 #if !UNITY_5_6_OR_NEWER
-			mesh.colors32 = colors;
+            mesh.colors32 = colors;
 #else
-			mesh.SetColors(vb.colors);
-			vb.End();
+            mesh.SetColors(vb.colors);
+            vb.End();
 #endif
-		}
+        }
 
-		void ChangeAlpha(float value)
-		{
-			_alpha = value;
+        void ChangeAlpha(float value)
+        {
+            _alpha = value;
 
-			int vertCount = mesh.vertexCount;
-			if (vertCount == 0)
-				return;
+            int vertCount = mesh.vertexCount;
+            if (vertCount == 0)
+                return;
 
 #if !UNITY_5_6_OR_NEWER
-			Color32[] colors = _colors;
-			if (colors == null)
-				colors = mesh.colors32;
+            Color32[] colors = _colors;
+            if (colors == null)
+                colors = mesh.colors32;
 #else
-			VertexBuffer vb = VertexBuffer.Begin();
-			mesh.GetColors(vb.colors);
-			List<Color32> colors = vb.colors;
+            VertexBuffer vb = VertexBuffer.Begin();
+            mesh.GetColors(vb.colors);
+            List<Color32> colors = vb.colors;
 #endif
-			for (int i = 0; i < vertCount; i++)
-			{
-				Color32 col = colors[i];
-				col.a = (byte)(_alpha * (hasAlphaBackup ? _alphaBackup[i] : (byte)255));
-				colors[i] = col;
-			}
+            for (int i = 0; i < vertCount; i++)
+            {
+                Color32 col = colors[i];
+                col.a = (byte)(_alpha * (hasAlphaBackup ? _alphaBackup[i] : (byte)255));
+                colors[i] = col;
+            }
 
 #if !UNITY_5_6_OR_NEWER
-			mesh.colors32 = colors;
+            mesh.colors32 = colors;
 #else
-			mesh.SetColors(vb.colors);
-			vb.End();
+            mesh.SetColors(vb.colors);
+            vb.End();
 #endif
-		}
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public Matrix4x4? vertexMatrix
-		{
-			get { return _vertexMatrix; }
-			set
-			{
-				_vertexMatrix = value;
-				_meshDirty = true;
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public VertexMatrix vertexMatrix
+        {
+            get { return _vertexMatrix; }
+            set
+            {
+                _vertexMatrix = value;
+                _meshDirty = true;
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public Vector3? cameraPosition
-		{
-			get { return _cameraPosition; }
-			set
-			{
-				_cameraPosition = value;
-				_meshDirty = true;
-			}
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
+        public MaterialPropertyBlock materialPropertyBlock
+        {
+            get
+            {
+                if (_propertyBlock == null)
+                    _propertyBlock = new MaterialPropertyBlock();
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public void SetMeshDirty()
-		{
-			_meshDirty = true;
-		}
+                _blockUpdated = true;
+                return _propertyBlock;
+            }
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <returns></returns>
-		public bool UpdateMesh()
-		{
-			if (_meshDirty)
-			{
-				UpdateMeshNow();
-				return true;
-			}
-			else
-				return false;
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        public void SetMeshDirty()
+        {
+            _meshDirty = true;
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		public void Dispose()
-		{
-			if (mesh != null)
-			{
-				if (Application.isPlaying)
-					UnityEngine.Object.Destroy(mesh);
-				else
-					UnityEngine.Object.DestroyImmediate(mesh);
-				mesh = null;
-			}
-			if (_manager != null)
-			{
-				_manager.Release();
-				_manager = null;
-			}
-			_material = null;
-			meshRenderer = null;
-			meshFilter = null;
-			_stencilEraser = null;
-			meshModifier = null;
-		}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
+        public bool UpdateMesh()
+        {
+            if (_meshDirty)
+            {
+                UpdateMeshNow();
+                return true;
+            }
+            else
+                return false;
+        }
 
-		/// <summary>
-		/// 
-		/// </summary>
-		/// <param name="context"></param>
-		/// <param name="alpha"></param>
-		/// <param name="grayed"></param>
-		public void Update(UpdateContext context, float alpha, bool grayed)
-		{
-			Stats.GraphicsCount++;
+        /// <summary>
+        /// 
+        /// </summary>
+        public void Dispose()
+        {
+            if (mesh != null)
+            {
+                if (Application.isPlaying)
+                    Object.Destroy(mesh);
+                else
+                    Object.DestroyImmediate(mesh);
+                mesh = null;
+            }
+            if ((_customMatarial & 128) != 0 && _material != null)
+                Object.DestroyImmediate(_material);
 
-			if (_meshDirty)
-			{
-				_alpha = alpha;
-				UpdateMeshNow();
-			}
-			else if (_alpha != alpha)
-				ChangeAlpha(alpha);
+            _manager = null;
+            _material = null;
+            meshRenderer = null;
+            meshFilter = null;
+            _stencilEraser = null;
+            meshModifier = null;
+        }
 
-			uint clipId = context.clipInfo.clipId;
-			int matType = 0;
-			NMaterial nm = null;
-			if (!_customMatarial)
-			{
-				if (_manager != null)
-				{
-					if (context.clipped && !dontClip)
-					{
-						if (_maskFlag == 1)
-							matType = 6;
-						else if (context.rectMaskDepth == 0)
-							matType = grayed ? 1 : 0;
-						else if (context.clipInfo.soft)
-							matType = grayed ? 5 : 4;
-						else
-							matType = grayed ? 3 : 2;
-					}
-					else
-					{
-						clipId = 0;
-						matType = grayed ? 1 : 0;
-					}
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="context"></param>
+        /// <param name="alpha"></param>
+        /// <param name="grayed"></param>
+        public void Update(UpdateContext context, float alpha, bool grayed)
+        {
+            Stats.GraphicsCount++;
 
-					nm = _manager.GetMaterial(matType, blendMode, clipId);
-					_material = nm.material;
-					if ((object)_material != (object)meshRenderer.sharedMaterial)
-						meshRenderer.sharedMaterial = _material;
-				}
-				else
-				{
-					_material = null;
-					if ((object)meshRenderer.sharedMaterial != null)
-						meshRenderer.sharedMaterial = null;
-				}
-			}
+            if (_meshDirty)
+            {
+                _alpha = alpha;
+                UpdateMeshNow();
+            }
+            else if (_alpha != alpha)
+                ChangeAlpha(alpha);
 
-			if ((nm == null || nm._firstInstance) && (object)_material != null)
-			{
-				if (blendMode != BlendMode.Normal) //GetMateria已经保证了不同的blendMode会返回不同的共享材质，所以这里可以放心设置
-					BlendModeUtils.Apply(_material, blendMode);
+            if (_propertyBlock != null && _blockUpdated)
+            {
+                meshRenderer.SetPropertyBlock(_propertyBlock);
+                _blockUpdated = false;
+            }
 
-				bool clearStencil = nm == null || nm.stencilSet;
-				if (context.clipped)
-				{
-					if (_maskFlag != 1 && context.rectMaskDepth > 0) //在矩形剪裁下，且不是遮罩对象
-					{
-						_material.SetVector(ShaderConfig._properyIDs._ClipBox, context.clipInfo.clipBox);
-						if (context.clipInfo.soft)
-							_material.SetVector(ShaderConfig._properyIDs._ClipSoftness, context.clipInfo.softness);
-					}
+            if (_customMatarial != 0)
+            {
+                if ((_customMatarial & 2) != 0 && _material != null)
+                    context.ApplyClippingProperties(_material, false);
+            }
+            else
+            {
+                if (_manager != null)
+                {
+                    if (_maskFlag == 1)
+                    {
+                        _material = _manager.GetMaterial((int)MaterialFlags.AlphaMask | _materialFlags, BlendMode.Normal, context.clipInfo.clipId);
+                        context.ApplyAlphaMaskProperties(_material, false);
+                    }
+                    else
+                    {
+                        int matFlags = _materialFlags;
+                        if (grayed)
+                            matFlags |= (int)MaterialFlags.Grayed;
 
-					if (context.stencilReferenceValue > 0)
-					{
-						if (_maskFlag == 1) //是遮罩
-						{
-							if (context.stencilReferenceValue == 1)
-							{
-								_material.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Always);
-								_material.SetInt(ShaderConfig._properyIDs._Stencil, 1);
-								_material.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Replace);
-								_material.SetInt(ShaderConfig._properyIDs._StencilReadMask, 255);
-								_material.SetInt(ShaderConfig._properyIDs._ColorMask, 0);
-							}
-							else
-							{
-								if (context.isStencilReversing)
-									_material.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.NotEqual);
-								else
-									_material.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Equal);
-								_material.SetInt(ShaderConfig._properyIDs._Stencil, context.stencilReferenceValue | (context.stencilReferenceValue - 1));
-								_material.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Replace);
-								_material.SetInt(ShaderConfig._properyIDs._StencilReadMask, context.stencilReferenceValue - 1);
-								_material.SetInt(ShaderConfig._properyIDs._ColorMask, 0);
-							}
-						}
-						else
-						{
-							_material.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Equal);
-							_material.SetInt(ShaderConfig._properyIDs._Stencil, context.stencilCompareValue);
-							_material.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Keep);
-							_material.SetInt(ShaderConfig._properyIDs._StencilReadMask, context.stencilReferenceValue | (context.stencilReferenceValue - 1));
-							_material.SetInt(ShaderConfig._properyIDs._ColorMask, 15);
-						}
-						if (nm != null)
-							nm.stencilSet = true;
-						clearStencil = false;
-					}
-				}
+                        if (context.clipped)
+                        {
+                            if (context.stencilReferenceValue > 0)
+                                matFlags |= (int)MaterialFlags.StencilTest;
+                            if (context.rectMaskDepth > 0)
+                            {
+                                if (context.clipInfo.soft)
+                                    matFlags |= (int)MaterialFlags.SoftClipped;
+                                else
+                                    matFlags |= (int)MaterialFlags.Clipped;
+                            }
 
-				if (clearStencil)
-				{
-					if (nm != null)
-						nm.stencilSet = false;
+                            _material = _manager.GetMaterial(matFlags, blendMode, context.clipInfo.clipId);
+                            if (_manager.firstMaterialInFrame)
+                                context.ApplyClippingProperties(_material, true);
+                        }
+                        else
+                            _material = _manager.GetMaterial(matFlags, blendMode, 0);
+                    }
+                }
+                else
+                    _material = null;
 
-					_material.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Always);
-					_material.SetInt(ShaderConfig._properyIDs._Stencil, 0);
-					_material.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Keep);
-					_material.SetInt(ShaderConfig._properyIDs._StencilReadMask, 255);
-					_material.SetInt(ShaderConfig._properyIDs._ColorMask, 15);
-				}
-			}
+                if (!Material.ReferenceEquals(_material, meshRenderer.sharedMaterial))
+                    meshRenderer.sharedMaterial = _material;
+            }
 
-			if (_maskFlag != 0)
-			{
-				if (_maskFlag == 1)
-					_maskFlag = 2;
-				else
-				{
-					if (_stencilEraser != null)
-						_stencilEraser.enabled = false;
+            if (_maskFlag != 0)
+            {
+                if (_maskFlag == 1)
+                    _maskFlag = 2;
+                else
+                {
+                    if (_stencilEraser != null)
+                        _stencilEraser.enabled = false;
 
-					_maskFlag = 0;
-				}
-			}
-		}
+                    _maskFlag = 0;
+                }
+            }
+        }
 
-		internal void _PreUpdateMask(UpdateContext context)
-		{
-			//_maskFlag: 0-new mask, 1-active mask, 2-mask complete
-			if (_maskFlag == 0)
-			{
-				if (_stencilEraser == null)
-				{
-					_stencilEraser = new StencilEraser(gameObject.transform);
-					_stencilEraser.meshFilter.mesh = mesh;
-				}
-				else
-					_stencilEraser.enabled = true;
-			}
+        internal void _PreUpdateMask(UpdateContext context, uint maskId)
+        {
+            //_maskFlag: 0-new mask, 1-active mask, 2-mask complete
+            if (_maskFlag == 0)
+            {
+                if (_stencilEraser == null)
+                {
+                    _stencilEraser = new StencilEraser(gameObject.transform);
+                    _stencilEraser.meshFilter.mesh = mesh;
+                }
+                else
+                    _stencilEraser.enabled = true;
+            }
 
-			_maskFlag = 1;
+            _maskFlag = 1;
 
-			if (_manager != null)
-			{
-				NMaterial nm = _manager.GetMaterial(6, blendMode, context.clipInfo.clipId);
-				Material mat = nm.material;
-				if ((object)mat != (object)_stencilEraser.meshRenderer.sharedMaterial)
-					_stencilEraser.meshRenderer.sharedMaterial = mat;
+            if (_manager != null)
+            {
+                //这里使用maskId而不是clipInfo.clipId，是因为遮罩有两个用途，一个是写入遮罩，一个是擦除，两个不能用同一个材质
+                Material mat = _manager.GetMaterial((int)MaterialFlags.AlphaMask | _materialFlags, BlendMode.Normal, maskId);
+                if (!Material.ReferenceEquals(mat, _stencilEraser.meshRenderer.sharedMaterial))
+                    _stencilEraser.meshRenderer.sharedMaterial = mat;
 
+                context.ApplyAlphaMaskProperties(mat, true);
+            }
+        }
 
-				if (context.isStencilReversing)
-				{
-					int refValue = context.stencilReferenceValue | (context.stencilReferenceValue - 1);
-					mat.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Equal);
-					mat.SetInt(ShaderConfig._properyIDs._Stencil, refValue);
-					mat.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Zero);
-					mat.SetInt(ShaderConfig._properyIDs._StencilReadMask, refValue);
-					mat.SetInt(ShaderConfig._properyIDs._ColorMask, 0);
-				}
-				else
-				{
-					int refValue = context.stencilReferenceValue - 1;
-					mat.SetInt(ShaderConfig._properyIDs._StencilComp, (int)UnityEngine.Rendering.CompareFunction.Equal);
-					mat.SetInt(ShaderConfig._properyIDs._Stencil, refValue);
-					mat.SetInt(ShaderConfig._properyIDs._StencilOp, (int)UnityEngine.Rendering.StencilOp.Replace);
-					mat.SetInt(ShaderConfig._properyIDs._StencilReadMask, refValue);
-					mat.SetInt(ShaderConfig._properyIDs._ColorMask, 0);
-				}
-			}
-		}
+        void UpdateMeshNow()
+        {
+            _meshDirty = false;
 
-		void UpdateMeshNow()
-		{
-			_meshDirty = false;
+            if (_texture == null || _meshFactory == null)
+            {
+                if (mesh.vertexCount > 0)
+                {
+                    mesh.Clear();
 
-			if (_texture == null || _meshFactory == null)
-			{
-				if (mesh.vertexCount > 0)
-				{
-					mesh.Clear();
+                    if (meshModifier != null)
+                        meshModifier();
+                }
+                return;
+            }
 
-					if (meshModifier != null)
-						meshModifier();
-				}
-				return;
-			}
+            VertexBuffer vb = VertexBuffer.Begin();
+            vb.contentRect = _contentRect;
+            vb.uvRect = _texture.uvRect;
+            if (_texture != null)
+                vb.textureSize = new Vector2(_texture.width, _texture.height);
+            else
+                vb.textureSize = new Vector2(0, 0);
+            if (_flip != FlipType.None)
+            {
+                if (_flip == FlipType.Horizontal || _flip == FlipType.Both)
+                {
+                    float tmp = vb.uvRect.xMin;
+                    vb.uvRect.xMin = vb.uvRect.xMax;
+                    vb.uvRect.xMax = tmp;
+                }
+                if (_flip == FlipType.Vertical || _flip == FlipType.Both)
+                {
+                    float tmp = vb.uvRect.yMin;
+                    vb.uvRect.yMin = vb.uvRect.yMax;
+                    vb.uvRect.yMax = tmp;
+                }
+            }
+            vb.vertexColor = _color;
+            _meshFactory.OnPopulateMesh(vb);
 
-			VertexBuffer vb = VertexBuffer.Begin();
-			vb.contentRect = _contentRect;
-			vb.uvRect = _texture.uvRect;
-			if (_flip != FlipType.None)
-			{
-				if (_flip == FlipType.Horizontal || _flip == FlipType.Both)
-				{
-					float tmp = vb.uvRect.xMin;
-					vb.uvRect.xMin = vb.uvRect.xMax;
-					vb.uvRect.xMax = tmp;
-				}
-				if (_flip == FlipType.Vertical || _flip == FlipType.Both)
-				{
-					float tmp = vb.uvRect.yMin;
-					vb.uvRect.yMin = vb.uvRect.yMax;
-					vb.uvRect.yMax = tmp;
-				}
-			}
-			vb.vertexColor = _color;
-			_meshFactory.OnPopulateMesh(vb);
+            int vertCount = vb.currentVertCount;
+            if (vertCount == 0)
+            {
+                if (mesh.vertexCount > 0)
+                {
+                    mesh.Clear();
 
-			int vertCount = vb.currentVertCount;
-			if (vertCount == 0)
-			{
-				if (mesh.vertexCount > 0)
-				{
-					mesh.Clear();
+                    if (meshModifier != null)
+                        meshModifier();
+                }
+                vb.End();
+                return;
+            }
 
-					if (meshModifier != null)
-						meshModifier();
-				}
-				vb.End();
-				return;
-			}
+            if (_texture.rotated)
+            {
+                float xMin = _texture.uvRect.xMin;
+                float yMin = _texture.uvRect.yMin;
+                float yMax = _texture.uvRect.yMax;
+                float tmp;
+                for (int i = 0; i < vertCount; i++)
+                {
+                    Vector2 vec = vb.uvs[i];
+                    tmp = vec.y;
+                    vec.y = yMin + vec.x - xMin;
+                    vec.x = xMin + yMax - tmp;
+                    vb.uvs[i] = vec;
+                }
+            }
 
-			if (_texture.rotated)
-			{
-				float xMin = _texture.uvRect.xMin;
-				float yMin = _texture.uvRect.yMin;
-				float yMax = _texture.uvRect.yMax;
-				float tmp;
-				for (int i = 0; i < vertCount; i++)
-				{
-					Vector4 vec = vb.uv0[i];
-					tmp = vec.y;
-					vec.y = yMin + vec.x - xMin;
-					vec.x = xMin + yMax - tmp;
-					vb.uv0[i] = vec;
-				}
-			}
+            hasAlphaBackup = vb._alphaInVertexColor;
+            if (hasAlphaBackup)
+            {
+                if (_alphaBackup == null)
+                    _alphaBackup = new List<byte>();
+                else
+                    _alphaBackup.Clear();
+                for (int i = 0; i < vertCount; i++)
+                {
+                    Color32 col = vb.colors[i];
+                    _alphaBackup.Add(col.a);
 
-			hasAlphaBackup = vb._alphaInVertexColor;
-			if (hasAlphaBackup)
-			{
-				if (_alphaBackup == null)
-					_alphaBackup = new List<byte>();
-				else
-					_alphaBackup.Clear();
-				for (int i = 0; i < vertCount; i++)
-				{
-					Color32 col = vb.colors[i];
-					_alphaBackup.Add(col.a);
+                    col.a = (byte)(col.a * _alpha);
+                    vb.colors[i] = col;
+                }
+            }
+            else if (_alpha != 1)
+            {
+                for (int i = 0; i < vertCount; i++)
+                {
+                    Color32 col = vb.colors[i];
+                    col.a = (byte)(col.a * _alpha);
+                    vb.colors[i] = col;
+                }
+            }
 
-					col.a = (byte)(col.a * _alpha);
-					vb.colors[i] = col;
-				}
-			}
-			else if (_alpha != 1)
-			{
-				for (int i = 0; i < vertCount; i++)
-				{
-					Color32 col = vb.colors[i];
-					col.a = (byte)(col.a * _alpha);
-					vb.colors[i] = col;
-				}
-			}
+            if (_vertexMatrix != null)
+            {
+                Vector3 camPos = _vertexMatrix.cameraPos;
+                Vector3 center = new Vector3(camPos.x, camPos.y, 0);
+                center -= _vertexMatrix.matrix.MultiplyPoint(center);
+                for (int i = 0; i < vertCount; i++)
+                {
+                    Vector3 pt = vb.vertices[i];
+                    pt = _vertexMatrix.matrix.MultiplyPoint(pt);
+                    pt += center;
+                    Vector3 vec = pt - camPos;
+                    float lambda = -camPos.z / vec.z;
+                    pt.x = camPos.x + lambda * vec.x;
+                    pt.y = camPos.y + lambda * vec.y;
+                    pt.z = 0;
 
-			if (_vertexMatrix != null)
-			{
-				Matrix4x4 mm = (Matrix4x4)_vertexMatrix;
-				Vector3 camPos = _cameraPosition != null ? (Vector3)_cameraPosition : Vector3.zero;
-				Vector3 center = new Vector3(camPos.x, camPos.y, 0);
-				center -= mm.MultiplyPoint(center);
-				for (int i = 0; i < vertCount; i++)
-				{
-					Vector3 pt = vb.vertices[i];
-					pt = mm.MultiplyPoint(pt);
-					pt += center;
-					Vector3 vec = pt - camPos;
-					float lambda = -camPos.z / vec.z;
-					pt.x = camPos.x + lambda * vec.x;
-					pt.y = camPos.y + lambda * vec.y;
-					pt.z = 0;
+                    vb.vertices[i] = pt;
+                }
+            }
 
-					vb.vertices[i] = pt;
-				}
-			}
-
-			mesh.Clear();
+            mesh.Clear();
 
 #if UNITY_5_2 || UNITY_5_3_OR_NEWER
-			if (vb._isArbitraryQuad)
-				vb.FixUVForArbitraryQuad();
-
-			mesh.SetVertices(vb.vertices);
-			mesh.SetUVs(0, vb.uv0);
-			mesh.SetColors(vb.colors);
-			mesh.SetTriangles(vb.triangles, 0);
+            mesh.SetVertices(vb.vertices);
+            if (vb._isArbitraryQuad)
+                mesh.SetUVs(0, vb.FixUVForArbitraryQuad());
+            else
+                mesh.SetUVs(0, vb.uvs);
+            mesh.SetColors(vb.colors);
+            mesh.SetTriangles(vb.triangles, 0);
+            if (vb.uvs2.Count == vb.uvs.Count)
+                mesh.SetUVs(1, vb.uvs2);
 
 #if !UNITY_5_6_OR_NEWER
-			_colors = null;
+            _colors = null;
 #endif
-
 #else
-			if (_vertices == null || _vertices.Length != vertCount)
-			{
-				_vertices = new Vector3[vertCount];
-				_uv = new Vector2[vertCount];
-				_colors = new Color32[vertCount];
-			}
-			vb.vertices.CopyTo(_vertices);
-			vb.uv0.CopyTo(_uv);
-			vb.colors.CopyTo(_colors);
+            Vector3[] vertices = new Vector3[vertCount];
+            Vector2[] uv = new Vector2[vertCount];
+            _colors = new Color32[vertCount];
+            int[] triangles = new int[vb.triangles.Count];
 
-			if (_triangles == null || _triangles.Length != vb.triangles.Count)
-				_triangles = new int[vb.triangles.Count];
-			vb.triangles.CopyTo(_triangles);
+            vb.vertices.CopyTo(vertices);
+            vb.uvs.CopyTo(uv);
+            vb.colors.CopyTo(_colors);
+            vb.triangles.CopyTo(triangles);
 
-			mesh.vertices = _vertices;
-			mesh.uv = _uv;
-			mesh.triangles = _triangles;
-			mesh.colors32 = _colors;
+            mesh.vertices = vertices;
+            mesh.uv = uv;
+            mesh.triangles = triangles;
+            mesh.colors32 = _colors;
+
+            if(vb.uvs2.Count==uv.Length)
+            {
+                uv = new Vector2[vertCount];
+                vb.uvs2.CopyTo(uv);
+                mesh.uv2 = uv;
+            }
 #endif
-			vb.End();
+            vb.End();
 
-			if (meshModifier != null)
-				meshModifier();
-		}
+            if (meshModifier != null)
+                meshModifier();
+        }
 
-		public void OnPopulateMesh(VertexBuffer vb)
-		{
-			Rect rect = texture.GetDrawRect(vb.contentRect);
+        public void OnPopulateMesh(VertexBuffer vb)
+        {
+            Rect rect = texture.GetDrawRect(vb.contentRect);
 
-			vb.AddQuad(rect, vb.vertexColor, vb.uvRect);
-			vb.AddTriangles();
-			vb._isArbitraryQuad = vertexMatrix != null;
-		}
-	}
+            vb.AddQuad(rect, vb.vertexColor, vb.uvRect);
+            vb.AddTriangles();
+            vb._isArbitraryQuad = _vertexMatrix != null;
+        }
 
-	class StencilEraser
-	{
-		public GameObject gameObject;
-		public MeshFilter meshFilter;
-		public MeshRenderer meshRenderer;
+        class StencilEraser
+        {
+            public GameObject gameObject;
+            public MeshFilter meshFilter;
+            public MeshRenderer meshRenderer;
 
-		public StencilEraser(Transform parent)
-		{
-			gameObject = new GameObject("StencilEraser");
-			ToolSet.SetParent(gameObject.transform, parent);
+            public StencilEraser(Transform parent)
+            {
+                gameObject = new GameObject("StencilEraser");
+                gameObject.transform.SetParent(parent, false);
 
-			meshFilter = gameObject.AddComponent<MeshFilter>();
-			meshRenderer = gameObject.AddComponent<MeshRenderer>();
-#if (UNITY_5 || UNITY_5_3_OR_NEWER)
-			meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-			meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
-#else
-			meshRenderer.castShadows = false;
-#endif
-			meshRenderer.receiveShadows = false;
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+                meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+                meshRenderer.receiveShadows = false;
 
-			gameObject.layer = parent.gameObject.layer;
-			gameObject.hideFlags = parent.gameObject.hideFlags;
-			meshFilter.hideFlags = parent.gameObject.hideFlags;
-			meshRenderer.hideFlags = parent.gameObject.hideFlags;
-		}
+                gameObject.layer = parent.gameObject.layer;
+                gameObject.hideFlags = parent.gameObject.hideFlags;
+                meshFilter.hideFlags = parent.gameObject.hideFlags;
+                meshRenderer.hideFlags = parent.gameObject.hideFlags;
+            }
 
-		public bool enabled
-		{
-			get { return meshRenderer.enabled; }
-			set { meshRenderer.enabled = value; }
-		}
-	}
+            public bool enabled
+            {
+                get { return meshRenderer.enabled; }
+                set { meshRenderer.enabled = value; }
+            }
+        }
+    }
 }
